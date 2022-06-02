@@ -232,13 +232,13 @@ class CREATE(Command):
 
     def run(self, aggregation):
         if self.is_subbucket:
-            aggregation.create_buckets(self.bucket_name, self.type_name, continuous=self.continuous, parent=self.parent_bucket_name)
+            bucket = aggregation.create_buckets(self.bucket_name, self.type_name, continuous=self.continuous, parent=self.parent_bucket_name)
         else:
-            aggregation.create_buckets(self.bucket_name, self.type_name, continuous=self.continuous)
+            bucket = aggregation.create_buckets(self.bucket_name, self.type_name, continuous=self.continuous)
 
-        aggregation.min_value = self.min_value
-        aggregation.max_value = self.max_value
-        aggregation.step = self.step_value
+        bucket.min_value = self.min_value
+        bucket.max_value = self.max_value
+        bucket.step = self.step_value
 
 
 class LET(Command):

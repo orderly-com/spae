@@ -19,10 +19,9 @@ class Column:
         self.column = column
 
     def initialize(self):
-        if self.column in self.table.df.schema:
-            type_cls = self.table.df.schema[self.column].dataType.__class__
-            self.handler = types.get(type_cls, DataType)
-            self.column = self.handler.preprocess_column(self.table, self.column)
+        type_cls = self.table.df.schema[self.column].dataType.__class__
+        self.handler = types.get(type_cls, DataType)
+        self.column = self.handler.preprocess_column(self.table, self.column)
 
     def __eq__(self, obj):
         return self.column == obj.column
@@ -82,6 +81,12 @@ class Series:
 
         df = self.entity.get_df()
         column = self.entity.bucket_using
+        if self.bucket.min_value:
+            df = df.where(col(column.column) >= self.bucket.min_value)
+
+        if self.bucket.max_value:
+            df = df.where(col(column.column) <= self.bucket.max_value)
+
         if self.bucket.handler != Category:
             bucketizer = self.bucket.get_bucketizer(column.column)
             df = bucketizer.transform(df)
@@ -201,27 +206,30 @@ class Bucket:
         return parents + [self]
 
     def initialize(self):
+        min_value = max_value = None
+        if self.max_value is None or self.min_value is None:
+            # creating buckets
+            for table, using, condition in self.tables:
+                df = table.df
+                _min, _max = self.handler.get_range(table, using, condition)
+                if min_value:
+                    if _min < min_value:
+                        min_value = _min
+                else:
+                    min_value = _min
+
+                if max_value:
+                    if _max > max_value:
+                        max_value = _max
+                else:
+                    max_value = _max
+
         if self.min_value is not None:
-            self.min_value = self.handler.get_min_value(self.min_value)
+            min_value = self.handler.get_min_value(self.min_value)
 
         if self.max_value is not None:
-            self.max_value = self.handler.get_max_value(self.max_value)
-        min_value = max_value = None
-        # creating buckets
-        for table, using, condition in self.tables:
-            df = table.df
-            _min, _max = self.handler.get_range(table, using, condition)
-            if min_value:
-                if _min < min_value:
-                    min_value = _min
-            else:
-                min_value = _min
+            max_value = self.handler.get_max_value(self.max_value)
 
-            if max_value:
-                if _max > max_value:
-                    max_value = _max
-            else:
-                max_value = _max
         try:
             self.value_list = self.handler.get_value_list(min_value, max_value, self.step)
         except DataSetEmpty:
@@ -252,6 +260,7 @@ class Aggregation:
             if parent not in self.buckets:
                 raise BucketDoesNotExist()
             bucket.parent = parent
+        return bucket
 
     def run(self):
         for table_name, table in self.tables.items():
