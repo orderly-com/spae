@@ -13,6 +13,12 @@ from .exceptions import BucketDoesNotExist, BucketNameAlreadyExists, DataSetEmpt
 
 
 class DataBase:
+    '''
+    Declares a DB source, multiple DataBases are supported since 1.1.0
+    name is used in AQL, in LET command table_name will be {db}.{table}.
+    `default` is used if db name is not specified.
+    db_type enum is in spae.definitions
+    '''
     def __init__(self, spae, name, url, user, password, db_type):
         self.spae = spae
         self.name = name
