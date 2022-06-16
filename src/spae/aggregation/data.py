@@ -22,7 +22,12 @@ class DataType:
     @staticmethod
     def get_range(table, column, condition):
         using = column.column
-        d_range = table.df.filter(condition).select(min(using).alias('__min'), max(using).alias('__max')).collect()[0]
+        if condition:
+            df = table.df.filter(condition)
+        else:
+            df = table.df
+
+        d_range = df.select(min(using).alias('__min'), max(using).alias('__max')).collect()[0]
         return d_range['__min'], d_range['__max']
 
     @staticmethod

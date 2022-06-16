@@ -3,8 +3,8 @@ from setuptools import setup, find_packages
 
 setup(
     name='spae',
-    version='1.0.0',
-    url='https://github.com/RayYangFromOrderly/spae',
+    version='1.1.0',
+    url='https://github.com/orderly-com/spae',
     license='BSD',
     description='Sparked Parallel Aggregation Concentrated Engine',
     author='RayYang',

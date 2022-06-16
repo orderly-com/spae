@@ -5,9 +5,84 @@ from datetime import timedelta
 from pyspark.ml.feature import Bucketizer
 from pyspark.sql.functions import *
 
+from spae.definitions import DataBaseType
+
 from .utils import get_column
 from .data import types, DataType, DateTime, Category
 from .exceptions import BucketDoesNotExist, BucketNameAlreadyExists, DataSetEmpty
+
+
+class DataBase:
+    '''
+    Declares a DB source, multiple DataBases are supported since 1.1.0
+    name is used in AQL, in LET command table_name will be {db}.{table}.
+    `default` is used if db name is not specified.
+    db_type enum is in spae.definitions
+    '''
+    def __init__(self, spae, name, url, user, password, db_type):
+        self.spae = spae
+        self.name = name
+        self.url = url
+        self.user = user
+        self.password = password
+        self.db_type = db_type
+        self.tables = {}
+
+    def get_table(self, table_name):
+        if table_name not in self.tables:
+            self.tables[table_name] = Table(self, table_name)
+        return self.tables[table_name]
+
+
+class Table:
+    def __init__(self, db, table_name):
+        self.db = db
+        self.spae = db.spae
+        self.table_name = table_name
+        self.df = None
+        self.columns = {}
+        self.annotations = []
+
+    def add_fields(self, *fields, annotated=False):
+        for field in fields:
+            if field not in self.columns:
+                column = Column(self, field)
+                self.columns[field] = column
+            else:
+                column = self.columns[field]
+            if annotated:
+                column.annotated = True
+
+        return column
+
+    def annotate(self, annotation, as_field):
+        self.annotations.append((annotation, as_field))
+
+    def initialize(self):
+        if self.db.db_type == DataBaseType.POSTGRES:
+            self.df = (
+                self.spae.spark.read.format('jdbc')
+                .option('url', f'jdbc:{ self.db.url }') # postgresql://postgres:5432/postgres
+                .option('driver', 'org.postgresql.Driver') # currently only postgresql is supported.
+                .option('dbtable', self.table_name)
+                .option('user', self.db.user)
+                .option('password', self.db.password)
+                .load()
+            )
+        elif self.db.db_type == DataBaseType.MONGODB:
+            self.df = (
+                self.spae.spark.read.format('com.mongodb.spark.sql.DefaultSource')
+                .option('spark.mongodb.input.uri', f'{self.db.url}.{self.table_name}?authSource=admin')
+                .load()
+            )
+
+        self.df = self.df.select(*[column.column for column in self.columns.values() if not column.annotated])
+
+        for annotation, as_field in self.annotations:
+            self.df = self.df.withColumn(as_field, eval(annotation))
+
+        for column in self.columns.values():
+            column.initialize()
 
 
 class Column:
@@ -94,47 +169,6 @@ class Series:
             df = df.withColumn(self.bucket.get_column_name(), df[column.column])
         df = df.groupBy(self.bucket.get_column_name()).agg(self.agg.alias(self.id))
         return df
-
-
-class Table:
-    def __init__(self, spae, table_name):
-        self.spae = spae
-        self.table_name = table_name
-        self.df = None
-        self.columns = {}
-        self.annotations = []
-
-    def add_fields(self, *fields, annotated=False):
-        for field in fields:
-            if field not in self.columns:
-                column = Column(self, field)
-                self.columns[field] = column
-            else:
-                column = self.columns[field]
-            if annotated:
-                column.annotated = True
-
-        return column
-
-    def annotate(self, annotation, as_field):
-        self.annotations.append((annotation, as_field))
-
-    def initialize(self):
-        self.df = (
-            self.spae.spark.read.format("jdbc")
-            .option("url", f"jdbc:{ self.spae.db_url }") # postgresql://postgres:5432/postgres
-            .option("driver", "org.postgresql.Driver") # currently only postgresql is supported.
-            .option("dbtable", self.table_name)
-            .option("user", self.spae.db_user)
-            .option("password", self.spae.db_password)
-            .load()
-            .select(*[column.column for column in self.columns.values() if not column.annotated])
-        )
-        for annotation, as_field in self.annotations:
-            self.df = self.df.withColumn(as_field, eval(annotation))
-
-        for column in self.columns.values():
-            column.initialize()
 
 
 class Bucket:
@@ -241,7 +275,6 @@ class Bucket:
 class Aggregation:
     def __init__(self, spae):
         self.buckets = {}
-        self.tables = {}
         self.entities = {}
         self.series = {}
         self.returning_series = {}
@@ -263,8 +296,9 @@ class Aggregation:
         return bucket
 
     def run(self):
-        for table_name, table in self.tables.items():
-            table.initialize()
+        for db_name, db in self.spae.db_configuration.items():
+            for table_name, table in db.tables.items():
+                table.initialize()
 
         for bucket_name, bucket in self.buckets.items():
             bucket.initialize()
@@ -301,13 +335,12 @@ class Aggregation:
 
         return bucket_data
 
-    def get_table(self, table_name):
-        if table_name not in self.tables:
-            self.tables[table_name] = Table(self.spae, table_name)
-        return self.tables[table_name]
+    def get_db(self, db_name):
+        return self.spae.db_configuration[db_name]
 
-    def create_entity(self, table_name, bucket_name, field, name, has_condition, condition):
-        table = self.get_table(table_name)
+    def create_entity(self, db_name, table_name, bucket_name, field, name, has_condition, condition):
+        db = self.get_db(db_name)
+        table = db.get_table(table_name)
         column = table.add_fields(field)
         bucket = self.buckets[bucket_name]
         bucket.add_table(table, column, condition)

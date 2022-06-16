@@ -147,7 +147,13 @@ class BucketName(Arg):
 
 
 class TableName(Arg):
-    pass
+    def resolve(self, source_components, index):
+        index, args = super().resolve(source_components, index)
+        table_name = args[0]
+        if '.' not in table_name:
+            table_name = f'default.{table_name}'
+        db_name, table_name = table_name.split('.')
+        return index, [db_name, table_name]
 
 
 class SeriesName(Arg):
@@ -269,8 +275,9 @@ class LET(Command):
             OneOrMore(Arg(), flat=True)
         ),
     ]
-    def __init__(self, table_name, bucket_name, field, name, has_condition, condition, has_annotation, annotation, as_field, has_fields, additional_fields):
+    def __init__(self, db_name, table_name, bucket_name, field, name, has_condition, condition, has_annotation, annotation, as_field, has_fields, additional_fields):
         super().__init__()
+        self.db_name = db_name
         self.table_name = table_name
         self.bucket_name = bucket_name
         self.field = field
@@ -284,7 +291,7 @@ class LET(Command):
         self.additional_fields = additional_fields
 
     def run(self, aggregation):
-        entity = aggregation.create_entity(self.table_name, self.bucket_name, self.field, self.name, self.has_condition, self.condition,)
+        entity = aggregation.create_entity(self.db_name, self.table_name, self.bucket_name, self.field, self.name, self.has_condition, self.condition,)
         if self.has_fields:
             entity.table.add_fields(*self.additional_fields)
 
